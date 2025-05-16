@@ -8,11 +8,9 @@ from fpdf import FPDF
 
 # Load environment variables
 load_dotenv()
-genai.configure(api_key=os.getenv("AIzaSyDHTP7a2bBOPBJtgSHO8J2DnwPA1wx0I0s"))
-#demo :AIzaSyAtdPFpb2ZFWibkbvHTuLvHxRclmTGw5qg
-#AIzaSyDHTP7a2bBOPBJtgSHO8J2DnwPA1wx0I0s
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
-# Supported diseasesstreamlit run app.py
+# Supported diseases
 DISEASES = {
     "cross eyes": {
         "symptoms": ["Misalignment of the eyes", "Double vision", "Poor depth perception"],
@@ -40,7 +38,22 @@ DISEASES = {
     }
 }
 
-def generate_pdf_report(user_details, disease_detected, image):
+# Updated prompt
+input_prompt = """
+You are an expert in identifying eye diseases. 
+First, determine if the input image is a valid eye image. A valid eye image is a close-up photograph of a human eye, with the eye prominently centered and filling the frame. The image should show detailed features such as the iris, pupil, sclera, eyelids, and eyebrows. The iris should display color variations and a reflective highlight near the pupil. The pupil should be clearly visible and moderately dilated. The sclera should be clear with a slight pinkish hue near the edges. The upper eyelid should be partially visible with a smooth skin texture and natural crease, and the lower eyelid should be faintly discernible. Thick, dark eyebrows should be prominent above the eye, with individual hairs visible. The skin around the eye should have a light complexion with a glossy finish, showing fine lines and pores. The image should be well-lit with soft shadows enhancing the depth of the eye and surrounding features. 
+
+If the image is not a valid eye image, respond with "INVALID_IMAGE".
+
+If the image is a valid eye image, check for the following conditions: cross eyes, conjunctivitis, cataract, glaucoma, uveitis, or bulging eyes. For bulging eyes, look for protrusion of one or both eyeballs, potential thyroid-related signs, and surrounding tissue swelling.
+
+If one of these conditions is detected, respond with the name of the condition (e.g., "cataract").
+
+If no condition is detected, respond with "HEALTHY_EYE".
+"""
+
+# Function to generate PDF report
+def generate_pdf_report(user_details, image, model_response):
     pdf_filename = f"eye_disease_report_{uuid.uuid4()}.pdf"
     
     pdf = FPDF('P', 'mm', 'A4')
@@ -60,34 +73,34 @@ def generate_pdf_report(user_details, disease_detected, image):
         pdf.cell(0, 10, f"{key}: {value}", ln=True)
     pdf.ln(5)
     
-    # Disease details
-    if disease_detected in DISEASES:
-        pdf.set_font_size(14)
-        pdf.cell(0, 10, 'Diagnosis Details', ln=True)
-        pdf.set_font_size(12)
-        
-        # Disease Name
-        pdf.cell(0, 10, f"Detected Condition: {disease_detected.title()}", ln=True)
-        
-        # Symptoms
+    # Diagnosis details
+    pdf.set_font_size(14)
+    pdf.cell(0, 10, 'Diagnosis Details', ln=True)
+    pdf.set_font_size(12)
+    
+    if model_response in DISEASES:
+        disease = model_response
+        pdf.cell(0, 10, f"Detected Condition: {disease.title()}", ln=True)
         pdf.ln(5)
         pdf.cell(0, 10, 'Key Symptoms:', ln=True)
-        for symptom in DISEASES[disease_detected]["symptoms"]:
+        for symptom in DISEASES[disease]["symptoms"]:
             pdf.cell(0, 10, f"- {symptom}", ln=True)
-        
-        # Precautions
         pdf.ln(5)
         pdf.cell(0, 10, 'Recommended Precautions:', ln=True)
-        for precaution in DISEASES[disease_detected]["precautions"]:
+        for precaution in DISEASES[disease]["precautions"]:
             pdf.cell(0, 10, f"- {precaution}", ln=True)
-        
-        # Medical Advice
         pdf.ln(5)
         pdf.cell(0, 10, 'Medical Recommendation:', ln=True)
-        pdf.multi_cell(0, 10, f"It is crucial to consult an ophthalmologist for a comprehensive examination and personalized treatment plan for {disease_detected}.")
+        pdf.multi_cell(0, 10, f"It is crucial to consult an ophthalmologist for a comprehensive examination and personalized treatment plan for {disease}.")
+    elif model_response == "healthy_eye":
+        pdf.cell(0, 10, 'Healthy Eye', ln=True)
+        pdf.multi_cell(0, 10, 'The uploaded image shows a healthy eye with no signs of disease. Continue regular eye check-ups to maintain optimal eye health.')
+    elif model_response == "invalid_image":
+        pdf.cell(0, 10, 'Invalid Image', ln=True)
+        pdf.multi_cell(0, 10, 'The uploaded image is not a valid eye image. Please upload a close-up photograph of a human eye for analysis.')
     else:
-        pdf.cell(0, 10, 'No specific eye disease detected', ln=True)
-        pdf.multi_cell(0, 10, 'While no specific condition was identified, regular eye check-ups are recommended for maintaining optimal eye health.')
+        pdf.cell(0, 10, 'Analysis Result', ln=True)
+        pdf.multi_cell(0, 10, 'Unable to determine the condition from the image. Please consult an ophthalmologist for a proper examination.')
     
     # Add image
     pdf.ln(10)
@@ -95,11 +108,13 @@ def generate_pdf_report(user_details, disease_detected, image):
         image_path = f"uploaded_image_{uuid.uuid4()}.png"
         image.save(image_path)
         pdf.image(image_path, x=10, y=pdf.get_y(), w=100)
+        os.remove(image_path)  # Clean up temporary image file
     
     # Save to file
     pdf.output(pdf_filename)
     return pdf_filename
 
+# Function to detect disease
 def detect_disease(input_prompt, image_data):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -108,6 +123,7 @@ def detect_disease(input_prompt, image_data):
     except Exception as e:
         return f"Error: {str(e)}"
 
+# Function to setup image data
 def input_image_setup(uploaded_file):
     if uploaded_file is not None:
         bytes_data = uploaded_file.getvalue()
@@ -148,10 +164,10 @@ with st.sidebar.form(key="personal_details_form"):
     light_sensitivity = st.checkbox("Light sensitivity", key="light_sensitivity")
     other_symptoms = st.text_input("Other (if any):", key="other_symptoms")
     
-    # Specific conditions
+    # Additional factors
     st.subheader("Additional Factors")
     sugar = st.checkbox("Sugar (Diabetes)", key="sugar")
-    none = st.checkbox("None", key="none")
+    none_factor = st.checkbox("None", key="none_factor")
     
     # Submit button for the form
     submit_button = st.form_submit_button(label="Submit")
@@ -162,15 +178,6 @@ with st.sidebar.form(key="personal_details_form"):
         else:
             st.session_state.submitted = True
             st.success("Form submitted successfully!")
-
-# AI Prompt for Disease Detection
-input_prompt = """
-You are an expert in identifying eye diseases. 
-Detect if the input image shows one of these conditions: 
-cross eyes, conjunctivitis, cataract, glaucoma, uveitis, or bulging eyes. 
-For bulging eyes, look for protrusion of one or both eyeballs, potential thyroid-related signs, and surrounding tissue swelling.
-If it is not an eye image or if the disease is not listed, respond with "This is not an eye image or an unsupported condition."
-"""
 
 # File uploader for images
 uploaded_file = st.file_uploader("Upload an eye image...", type=["jpg", "jpeg", "png"])
@@ -207,29 +214,48 @@ if submit:
             # Check user input conditions
             if sugar:
                 disease_found = "glaucoma"
-            elif none:
+                message = f"Predicted Disease: {disease_found.title()} detected (based on reported diabetes)!"
+                model_response = "glaucoma"
+            elif none_factor:
                 disease_found = None
+                message = "Healthy eye: The uploaded image shows a healthy eye with no signs of disease"
+                model_response = "healthy_eye"
             else:
                 image_data = input_image_setup(uploaded_file)
                 response = detect_disease(input_prompt, image_data)
-                disease_found = next((disease for disease in DISEASES if disease in response), None)
+                model_response = response
+                
+                if response == "invalid_image":
+                    disease_found = None
+                    message = "The uploaded image is not a valid eye image. Please upload a close-up photograph of a human eye."
+                elif response == "healthy_eye":
+                    disease_found = None
+                    message = "Healthy eye: The uploaded image shows a healthy eye with no signs of disease."
+                elif response in DISEASES:
+                    disease_found = response
+                    message = f"Predicted Disease: {disease_found.title()} detected!"
+                else:
+                    disease_found = None
+                    message = "Unable to determine the condition from the image."
             
             # Generate report
-            pdf_buffer = generate_pdf_report(user_details, disease_found, image)
+            pdf_filename = generate_pdf_report(user_details, image, model_response)
             
             # Provide download link
-            with open(pdf_buffer, 'rb') as pdf_file:
+            with open(pdf_filename, 'rb') as pdf_file:
                 st.download_button(
                     label="Download Report",
                     data=pdf_file,
                     file_name="Eye_Disease_Report.pdf",
                     mime="application/pdf"
                 )
+            os.remove(pdf_filename)  # Clean up PDF file
             
-            if disease_found:
-                st.success(f"Predicted Disease: {disease_found.title()} detected!")
+            # Display message
+            if "error" in message.lower() or "unable" in message.lower():
+                st.error(message)
             else:
-                st.success("The uploaded eye image shows no signs of disease")
+                st.success(message)
         
         except Exception as e:
             st.error(f"An error occurred: {e}")
