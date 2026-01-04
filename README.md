@@ -27,7 +27,7 @@ This application uses environment variables to store sensitive information such 
 To run the application, navigate to the directory containing the script and run the following command:
 
 ```
-streamlit run app.py
+python -m streamlit run app.py
 ```
 Replace app.py with the name of your Python script. This will start the Streamlit server and open the application in your default web browser.
 
